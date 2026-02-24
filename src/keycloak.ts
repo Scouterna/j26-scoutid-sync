@@ -79,6 +79,16 @@ export async function getAllGroups(
 	return groups;
 }
 
+export async function removeUserFromGroup(
+	userId: string,
+	groupId: string,
+): Promise<void> {
+	await client.users.delFromGroup({
+		id: userId,
+		groupId,
+	});
+}
+
 export async function addUserToGroup(
 	userId: string,
 	groupId: string,

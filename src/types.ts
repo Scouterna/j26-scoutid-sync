@@ -17,4 +17,5 @@ export type NormalizedParticipant = {
 	memberNumber: number;
 	fee: Fee;
 	answers: Answer[];
+	attending: boolean;
 };

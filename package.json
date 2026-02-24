@@ -16,10 +16,11 @@
 		"@keycloak/keycloak-admin-client": "^26.5.2",
 		"@scouterna/scoutnet": "^0.3.24",
 		"@types/node": "^24.10.9",
+		"arkenv": "^0.10.0",
 		"arktype": "^2.1.29",
 		"yaml": "^2.8.2"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "2.3.13"
+		"@biomejs/biome": "2.4.4"
 	}
 }

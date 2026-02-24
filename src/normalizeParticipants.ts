@@ -98,6 +98,8 @@ export function normalizeParticipants(
 			? participants.labels?.project_fee?.[participant.fee_id]
 			: null;
 
+		const attending = !participant.cancelled && Boolean(participant.confirmed);
+
 		normalizedParticipants.push({
 			memberNumber: participant.member_no ?? -1,
 			fee: {
@@ -105,6 +107,7 @@ export function normalizeParticipants(
 				name: fee ?? "",
 			},
 			answers,
+			attending,
 		});
 	}
 
