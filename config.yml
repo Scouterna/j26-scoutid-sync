@@ -1,0 +1,3 @@
+assignments:
+- groups: [j26-staff]
+  if: getAnswer('Internt', 'Allokering', 'Funktion')

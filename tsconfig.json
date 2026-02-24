@@ -1,0 +1,11 @@
+{
+	"compilerOptions": {
+		"module": "nodenext",
+		"strict": true,
+		"strictNullChecks": true,
+		"noUncheckedIndexedAccess": true,
+		"erasableSyntaxOnly": true,
+		"noEmit": true,
+		"allowImportingTsExtensions": true
+	}
+}
