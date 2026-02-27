@@ -5,7 +5,7 @@ export type Answer = {
 	sectionName: string;
 	tabId: number;
 	tabName: string;
-	value: string;
+	value: string | string[];
 };
 
 export type Fee = {

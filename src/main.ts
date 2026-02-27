@@ -1,95 +1,41 @@
-import { CACHE_MODE, withCache } from "./cache.ts";
 import { loadConfig } from "./config.ts";
 import { env } from "./env.ts";
 import { evaluateGroups } from "./groups.ts";
-import {
-	addUserToGroup,
-	createUser,
-	getAllGroups,
-	getAllUsers,
-	initKeycloakClient,
-	removeUserFromGroup,
-} from "./keycloak.ts";
-import { normalizeParticipants } from "./normalizeParticipants.ts";
-import {
-	getAllParticipants,
-	getQuestions,
-	initScoutnetClient,
-} from "./scoutnet.ts";
+import { addUserToGroup, createUser, removeUserFromGroup } from "./keycloak.ts";
+import { getKeycloakState } from "./steps/getKeycloakState.ts";
+import { getScoutnetState } from "./steps/getScoutnetState.ts";
 
-const {
-	KEYCLOAK_CLIENT_ID,
-	KEYCLOAK_CLIENT_SECRET,
-	KEYCLOAK_PARENT_GROUP_ID,
-	SCOUTNET_PROJECT_ID,
-	SCOUTNET_FORM_ID,
-	SCOUTNET_MEMBERS_API_KEY,
-	SCOUTNET_QUESTIONS_API_KEY,
-} = env;
-
-console.log("boot");
-if (CACHE_MODE !== "read") {
-	await initKeycloakClient({
-		baseUrl: "https://admin.dev.id.scouterna.se",
-		realmName: "jamboree26",
-		clientId: KEYCLOAK_CLIENT_ID,
-		clientSecret: KEYCLOAK_CLIENT_SECRET,
-	});
-}
-
-const cachedGetAllUsers = withCache(getAllUsers);
-const cachedGetAllGroups = withCache(getAllGroups);
-
-const allUsers = await cachedGetAllUsers();
-const allGroups = await cachedGetAllGroups(KEYCLOAK_PARENT_GROUP_ID);
+const { CACHE_MODE } = env;
 
 const config = await loadConfig("config.yml");
 
-await initScoutnetClient({
-	projectId: SCOUTNET_PROJECT_ID,
-	membersApiKey: SCOUTNET_MEMBERS_API_KEY,
-	questionsApiKey: SCOUTNET_QUESTIONS_API_KEY,
-});
-console.log("scoutnet");
-const cachedGetQuestions = withCache(getQuestions);
-const cachedGetAllParticipants = withCache(getAllParticipants);
+let start = performance.now();
 
-const questions = await cachedGetQuestions(SCOUTNET_FORM_ID);
-const participants = await cachedGetAllParticipants();
+const keycloakState = await getKeycloakState();
+const scoutnetState = await getScoutnetState();
 
-const normalizedParticipants = await normalizeParticipants(
-	questions,
-	participants,
-);
-
-const groupAssignments = evaluateGroups(
-	normalizedParticipants,
+const groupAssignments = await evaluateGroups(
+	scoutnetState.participants,
 	config.assignments,
 );
-console.log("douit");
-// TODO: Remove groups that are no longer assigned
 
-// TODO: Create map from group name to ID. Later if a group is not found, throw an
-// error so that we don't miss something.
+console.log(`Data loading took ${(performance.now() - start).toFixed(2)}ms`);
 
-const groupNameToId = new Map<string, string>();
-for (const group of allGroups) {
-	if (!group.name || !group.id) {
-		console.warn("Group without name or ID:", group);
-		continue;
-	}
-	groupNameToId.set(group.name, group.id);
-}
+let createdUsers = 0;
+let addedToGroups = 0;
+let removedFromGroups = 0;
 
+start = performance.now();
 for (const assignment of groupAssignments) {
 	const username = `scoutnet|${assignment.memberNumber}`;
-	const user = allUsers.find((u) => u.username === username);
+	const user = keycloakState.users.find((u) => u.username === username);
 	let userId = user?.id;
 
 	if (!user) {
+		createdUsers++;
 		if (CACHE_MODE === "read") {
 			console.warn(
-				`User ${username} not found in Keycloak. Skipping creation in read cache mode.`,
+				`SKIP: User ${username} would be created in Keycloak if not in read cache mode.`,
 			);
 			continue;
 		}
@@ -98,28 +44,91 @@ for (const assignment of groupAssignments) {
 
 	if (!userId) {
 		// Just here for type safety
-		throw new Error(`User ID for ${username} is undefined`);
+		throw new Error(`User ID for ${username} is undefined after creation`);
 	}
 
-	console.log(assignment);
+	const currentGroupIds = keycloakState.groupMemberships.get(userId) ?? [];
 
-	const groupIds = assignment.groups.map((groupName) => {
-		const groupId = groupNameToId.get(groupName);
+	const targetGroupIds = assignment.groups.map((groupName) => {
+		const groupId = keycloakState.groupNameToId.get(groupName);
 		if (!groupId) {
 			throw new Error(`Group "${groupName}" not found in Keycloak`);
 		}
 		return groupId;
 	});
 
-	const groupIdsToLeave = groupNameToId
-		.values()
-		.filter((groupId) => !groupIds.includes(groupId));
+	const groupsToLeave = currentGroupIds.filter(
+		(groupId) => !targetGroupIds.includes(groupId),
+	);
+	const groupsToJoin = targetGroupIds.filter(
+		(groupId) => !currentGroupIds.includes(groupId),
+	);
 
-	for (const groupId of groupIdsToLeave) {
+	if (groupsToLeave.length > 0) {
+		removedFromGroups += groupsToLeave.length;
+	}
+
+	if (groupsToJoin.length > 0) {
+		addedToGroups += groupsToJoin.length;
+	}
+
+	for (const groupId of groupsToLeave) {
+		if (CACHE_MODE === "read") {
+			console.warn(
+				`SKIP: User ${username} would be removed from group ID ${groupId} if not in read cache mode.`,
+			);
+			continue;
+		}
 		await removeUserFromGroup(userId, groupId);
 	}
 
-	for (const groupId of groupIds) {
+	for (const groupId of groupsToJoin) {
+		if (CACHE_MODE === "read") {
+			console.warn(
+				`SKIP: User ${username} would be added to group ID ${groupId} if not in read cache mode.`,
+			);
+			continue;
+		}
 		await addUserToGroup(userId, groupId);
 	}
 }
+
+const usersWithGroups = keycloakState.users.filter((user) =>
+	keycloakState.groupMemberships.has(user.id ?? ""),
+);
+const assignmentUsernames = new Set(
+	groupAssignments.map((a) => `scoutnet|${a.memberNumber}`),
+);
+const usersWithoutAssignments = usersWithGroups.filter(
+	(u) => !assignmentUsernames.has(u.username ?? ""),
+);
+
+for (const user of usersWithoutAssignments) {
+	const userId = user.id;
+	if (!userId) {
+		throw new Error(`User ID for ${user.username} is undefined`);
+	}
+
+	const groupIds = keycloakState.groupMemberships.get(userId) ?? [];
+
+	for (const groupId of groupIds) {
+		if (CACHE_MODE === "read") {
+			console.warn(
+				`SKIP: User ${user.username} would be removed from group ID ${groupId} if not in read cache mode.`,
+			);
+			continue;
+		}
+		await removeUserFromGroup(userId, groupId);
+	}
+}
+
+console.log(
+	`Group synchronization took ${(performance.now() - start).toFixed(2)}ms`,
+);
+
+console.log(`Users created: ${createdUsers}`);
+console.log(`Added to groups: ${addedToGroups}`);
+console.log(`Removed from groups: ${removedFromGroups}`);
+console.log(
+	`Removed from groups due to no assignment: ${usersWithoutAssignments.length}`,
+);

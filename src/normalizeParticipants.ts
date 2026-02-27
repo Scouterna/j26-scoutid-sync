@@ -1,63 +1,103 @@
 import { type } from "arktype";
-import {
-	type getAllParticipants,
-	type getQuestions,
-	normalize,
-} from "./scoutnet.ts";
+import type { getAllParticipants, getQuestions } from "./scoutnet.ts";
 import type { Answer, NormalizedParticipant } from "./types.ts";
-import { Section, Tab } from "./validators.ts";
 
-type Questions = Awaited<ReturnType<typeof getQuestions>>;
-type Participants = Awaited<ReturnType<typeof getAllParticipants>>;
+type QuestionsResponse = Awaited<ReturnType<typeof getQuestions>>;
+type ParticipantsResponse = Awaited<ReturnType<typeof getAllParticipants>>;
+
+const Tab = type({
+	id: "number",
+	title: "string",
+});
+
+const Section = type({
+	id: "number",
+	title: "string",
+});
+
+const Question = type({
+	question: "string",
+	type: "string",
+	tab_id: "number | null",
+	section_id: "number | null",
+	"choices?": type.Record(
+		"string",
+		type({ option: "string | null", value: "string | number | null" }),
+	),
+});
+
+const Participant = type({
+	member_no: "number",
+	"fee_id?": "number | null",
+	"cancelled?": "boolean | null",
+	"confirmed?": "boolean | null",
+	questions: type.Record("string", "string | string[] | null"),
+});
+export type Participant = typeof Participant.infer;
 
 export function normalizeParticipants(
-	questions: Questions,
-	participants: Participants,
+	questionsResponse: QuestionsResponse,
+	participantsResponse: ParticipantsResponse,
 ) {
+	const rawParticipants = Object.values(
+		participantsResponse.participants ?? {},
+	);
+	const participants = Participant.array()(rawParticipants);
+	if (participants instanceof type.errors) {
+		throw new Error(`Invalid participants: ${participants.summary}`);
+	}
+
+	const tabs = type.Record("string", Tab)(questionsResponse.tabs ?? {});
+	if (tabs instanceof type.errors) {
+		throw new Error(`Invalid tabs: ${tabs.summary}`);
+	}
+
+	const sections = type.Record(
+		"string",
+		Section,
+	)(questionsResponse.sections ?? {});
+	if (sections instanceof type.errors) {
+		throw new Error(`Invalid sections: ${sections.summary}`);
+	}
+
+	const questions = type.Record(
+		"string",
+		Question,
+	)(questionsResponse.questions ?? {});
+	if (questions instanceof type.errors) {
+		throw new Error(`Invalid questions: ${questions.summary}`);
+	}
+
 	const tabIdToName: Record<number, string> = {};
 	const sectionIdToName: Record<number, string> = {};
 
-	for (const tab of Object.values(normalize(questions.tabs) ?? {})) {
-		const tabData = Tab(tab);
-		if (tabData instanceof type.errors) {
-			throw new Error(`Invalid tab: ${tabData.summary}`);
-		}
-
-		tabIdToName[tabData.id] = tabData.title;
+	for (const tab of Object.values(tabs)) {
+		tabIdToName[tab.id] = tab.title;
 	}
 
-	for (const section of Object.values(normalize(questions.sections) ?? {})) {
-		const sectionData = Section(section);
-		if (sectionData instanceof type.errors) {
-			throw new Error(`Invalid section: ${sectionData.summary}`);
-		}
-
-		sectionIdToName[sectionData.id] = sectionData.title;
+	for (const section of Object.values(sections)) {
+		sectionIdToName[section.id] = section.title;
 	}
 
 	const normalizedParticipants: NormalizedParticipant[] = [];
 
-	for (const participant of Object.values(
-		normalize(participants.participants) ?? {},
-	)) {
+	for (const participant of participants) {
 		const answers: Answer[] = [];
 
-		for (const [questionId, value] of Object.entries(
-			normalize(participant.questions) ?? {},
-		)) {
-			const question = questions.questions?.[questionId];
+		for (const [questionId, value] of Object.entries(participant.questions)) {
+			const question = questions[questionId];
 
 			if (!question) {
-				console.warn("Question not found for id:", questionId);
+				// console.warn("Question not found for id:", questionId);
 				continue;
 			}
 
 			const options = Object.values(question.choices ?? {});
 
-			let normalizedValue: string | null = value;
+			let normalizedValue: string | string[] | null = value;
 
 			try {
-				const parsedValue = JSON.parse(value ?? "");
+				const parsedValue = JSON.parse(String(value) ?? "");
 				if ("linked_id" in parsedValue && "value" in parsedValue) {
 					normalizedValue = parsedValue.value;
 				}
@@ -76,12 +116,9 @@ export function normalizeParticipants(
 			}
 
 			const section =
-				question.section_id != null
-					? questions.sections?.[question.section_id]
-					: null;
+				question.section_id != null ? sections[question.section_id] : null;
 
-			const tab =
-				question.tab_id != null ? questions.tabs?.[question.tab_id] : null;
+			const tab = question.tab_id != null ? tabs[question.tab_id] : null;
 
 			answers.push({
 				questionId: Number(questionId),
@@ -95,7 +132,7 @@ export function normalizeParticipants(
 		}
 
 		const fee = participant.fee_id
-			? participants.labels?.project_fee?.[participant.fee_id]
+			? participantsResponse.labels?.project_fee?.[participant.fee_id]
 			: null;
 
 		const attending = !participant.cancelled && Boolean(participant.confirmed);

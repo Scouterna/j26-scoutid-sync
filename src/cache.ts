@@ -1,10 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { env } from "./env.ts";
 
-export const CACHE_MODE = process.env.CACHE_MODE as
-	| "read"
-	| "write"
-	| null
-	| undefined;
+const { CACHE_MODE } = env;
 
 // biome-ignore lint/suspicious/noExplicitAny: It's generic
 export function withCache<T extends (...args: any[]) => Promise<any>>(

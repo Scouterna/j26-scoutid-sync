@@ -1,4 +1,5 @@
 import { data, Evaluator, Lexer, Parser } from "@actions/expressions";
+import { Array as ArrayData } from "@actions/expressions/data/array";
 import type { ExpressionData } from "@actions/expressions/data/expressiondata";
 import { Null } from "@actions/expressions/data/null";
 import { StringData } from "@actions/expressions/data/string";
@@ -55,7 +56,11 @@ export function evaluateCondition(
 			);
 
 			if (answer) {
-				return new StringData(answer.value);
+				if (Array.isArray(answer.value)) {
+					return new ArrayData(...answer.value.map((v) => new StringData(v)));
+				} else {
+					return new StringData(answer.value);
+				}
 			} else {
 				return new Null();
 			}

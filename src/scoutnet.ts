@@ -1,4 +1,3 @@
-import { writeFile } from "node:fs/promises";
 import {
 	createAuthorizationHeader,
 	createClient,
@@ -15,6 +14,10 @@ export async function initScoutnetClient(options: {
 	membersApiKey: string;
 	questionsApiKey: string;
 }) {
+	// If the client is already initialized, we can skip re-initialization. This
+	// allows us to call initScoutnetClient multiple times without issues.
+	if (client) return;
+
 	client = createClient({});
 
 	projectId = String(options.projectId);

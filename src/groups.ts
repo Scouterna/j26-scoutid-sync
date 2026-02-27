@@ -9,12 +9,7 @@ export function evaluateGroups(
 	const groups: Map<number, string[]> = new Map();
 
 	for (const participant of participants) {
-		// For participants that are not attending, we want to make sure they are
-		// not in any groups. This is important since it may be that they were
-		// unregistered after an earlier group assignment, and we don't want them to
-		// keep their groups in that case.
 		if (!participant.attending) {
-			groups.set(participant.memberNumber, []);
 			continue;
 		}
 
@@ -33,8 +28,6 @@ export function evaluateGroups(
 			const numberResult = result.number();
 			const stringResult = result.coerceString();
 
-			console.log(participant.memberNumber, numberResult, stringResult);
-
 			const ok =
 				numberResult > 0 ||
 				(stringResult && stringResult !== "false" && stringResult !== "0");
@@ -45,8 +38,11 @@ export function evaluateGroups(
 		}
 	}
 
-	return groups.entries().map(([memberNumber, groups]) => ({
-		memberNumber,
-		groups,
-	}));
+	return groups
+		.entries()
+		.map(([memberNumber, groups]) => ({
+			memberNumber,
+			groups,
+		}))
+		.toArray();
 }

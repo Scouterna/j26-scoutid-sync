@@ -15,6 +15,10 @@ export async function initKeycloakClient({
 	clientId: string;
 	clientSecret: string;
 }) {
+	// If the client is already initialized, we can skip re-initialization. This
+	// allows us to call initKeycloakClient multiple times without issues.
+	if (client) return;
+
 	client = new KeycloakAdminClient({
 		baseUrl,
 		realmName,
@@ -77,6 +81,29 @@ export async function getAllGroups(
 	}
 
 	return groups;
+}
+
+export async function getGroupMembers(
+	groupId: string,
+	perPage = 100,
+): Promise<UserRepresentation[]> {
+	const members: UserRepresentation[] = [];
+	let first = 0;
+
+	while (true) {
+		const batch = await client.groups.listMembers({
+			id: groupId,
+			first,
+			max: perPage,
+		});
+		members.push(...batch);
+		if (batch.length < perPage) {
+			break;
+		}
+		first += perPage;
+	}
+
+	return members;
 }
 
 export async function removeUserFromGroup(
