@@ -18,6 +18,7 @@
 		"@types/node": "^24.10.9",
 		"arkenv": "^0.10.0",
 		"arktype": "^2.1.29",
+		"p-limit": "^7.3.0",
 		"yaml": "^2.8.2"
 	},
 	"devDependencies": {

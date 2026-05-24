@@ -1,3 +1,4 @@
+import pLimit from "p-limit";
 import { withCache } from "../cache.ts";
 import { env } from "../env.ts";
 import {
@@ -39,24 +40,30 @@ export async function getKeycloakState() {
 	 */
 	const groupMemberships = new Map<string, string[]>();
 
+	const limit = pLimit(10);
+
 	start = performance.now();
-	for (const group of groups) {
-		if (!group.id) {
-			throw new Error(`Group is missing id: ${JSON.stringify(group)}`);
-		}
+	await Promise.all(
+		groups.map((group) =>
+			limit(async () => {
+				if (!group.id) {
+					throw new Error(`Group is missing id: ${JSON.stringify(group)}`);
+				}
 
-		const members = await cachedGetGroupMembers(group.id);
+				const members = await cachedGetGroupMembers(group.id);
 
-		for (const member of members) {
-			if (!member.id) {
-				throw new Error(`User is missing id: ${JSON.stringify(member)}`);
-			}
+				for (const member of members) {
+					if (!member.id) {
+						throw new Error(`User is missing id: ${JSON.stringify(member)}`);
+					}
 
-			const userGroups = groupMemberships.get(member.id) ?? [];
-			userGroups.push(group.id);
-			groupMemberships.set(member.id, userGroups);
-		}
-	}
+					const userGroups = groupMemberships.get(member.id) ?? [];
+					userGroups.push(group.id);
+					groupMemberships.set(member.id, userGroups);
+				}
+			}),
+		),
+	);
 
 	console.log(
 		`Fetched Keycloak members of ${groups.length} groups in ${(performance.now() - start).toFixed(2)}ms`,

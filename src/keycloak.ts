@@ -46,6 +46,7 @@ export async function getAllUsers(
 	let first = 0;
 
 	while (true) {
+		console.log(`Fetching users ${first}–${first + perPage - 1}...`);
 		const batch = await client.users.find({
 			first,
 			max: perPage,
@@ -68,6 +69,7 @@ export async function getAllGroups(
 	let first = 0;
 
 	while (true) {
+		console.log(`Fetching groups ${first}–${first + perPage - 1}...`);
 		const batch = await client.groups.listSubGroups({
 			parentId,
 			first,
@@ -91,6 +93,7 @@ export async function getGroupMembers(
 	let first = 0;
 
 	while (true) {
+		console.log(`Fetching members of group ${groupId}, offset ${first}...`);
 		const batch = await client.groups.listMembers({
 			id: groupId,
 			first,
