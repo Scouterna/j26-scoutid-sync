@@ -10,6 +10,8 @@ import {
 
 const {
 	CACHE_MODE,
+	KEYCLOAK_BASE_URL,
+	KEYCLOAK_REALM_NAME,
 	KEYCLOAK_CLIENT_ID,
 	KEYCLOAK_CLIENT_SECRET,
 	KEYCLOAK_PARENT_GROUP_ID,
@@ -18,8 +20,8 @@ const {
 export async function getKeycloakState() {
 	if (CACHE_MODE !== "read") {
 		await initKeycloakClient({
-			baseUrl: "https://admin.dev.id.scouterna.se",
-			realmName: "jamboree26",
+			baseUrl: KEYCLOAK_BASE_URL,
+			realmName: KEYCLOAK_REALM_NAME,
 			clientId: KEYCLOAK_CLIENT_ID,
 			clientSecret: KEYCLOAK_CLIENT_SECRET,
 		});
