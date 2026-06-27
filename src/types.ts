@@ -15,6 +15,7 @@ export type Fee = {
 
 export type NormalizedParticipant = {
 	memberNumber: number;
+	groupId: number;
 	fee: Fee;
 	answers: Answer[];
 	attending: boolean;

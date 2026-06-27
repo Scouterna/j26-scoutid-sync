@@ -26,8 +26,13 @@ const Question = type({
 	),
 });
 
+const GroupRegistrationInfo = type({
+	"group_id?": "number | null",
+});
+
 const Participant = type({
 	member_no: "number",
+	"group_registration_info?": GroupRegistrationInfo.or("unknown[]").or("null"),
 	"fee_id?": "number | null",
 	"cancelled?": "boolean | null",
 	"confirmed?": "boolean | null",
@@ -139,6 +144,9 @@ export function normalizeParticipants(
 
 		normalizedParticipants.push({
 			memberNumber: participant.member_no ?? -1,
+			groupId: Array.isArray(participant.group_registration_info)
+				? 0
+				: (participant.group_registration_info?.group_id ?? 0),
 			fee: {
 				id: participant.fee_id ?? -1,
 				name: fee ?? "",

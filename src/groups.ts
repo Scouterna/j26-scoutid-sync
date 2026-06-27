@@ -24,7 +24,7 @@ export function evaluateGroups(
 		for (const assignment of assignments) {
 			const result = evaluateCondition(
 				assignment.if,
-				{ fee: participant.fee },
+				{ fee: participant.fee, group_id: participant.groupId },
 				{ answerIndex },
 				mappings,
 			);
@@ -42,7 +42,7 @@ export function evaluateGroups(
 				for (const dynGroup of assignment.dynamicGroups ?? []) {
 					const nameResult = evaluateCondition(
 						dynGroup.nameExpression,
-						{ fee: participant.fee },
+						{ fee: participant.fee, group_id: participant.groupId },
 						{ answerIndex },
 						mappings,
 					);

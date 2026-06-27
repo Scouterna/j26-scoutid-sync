@@ -43,6 +43,7 @@ export function evaluateCondition(
 	expression: string,
 	context: {
 		fee: Fee;
+		group_id: number;
 	},
 	internalContext: {
 		answerIndex: Map<string, Answer>;
