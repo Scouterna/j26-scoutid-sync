@@ -2,9 +2,16 @@ import { readFile } from "node:fs/promises";
 import { type } from "arktype";
 import { parse as parseYaml } from "yaml";
 
+export const DynamicGroup = type({
+	parent: "string",
+	nameExpression: "string",
+});
+export type DynamicGroup = typeof DynamicGroup.infer;
+
 export const Assignment = type({
 	groups: "string[]",
 	if: "string",
+	"dynamicGroups?": DynamicGroup.array(),
 });
 export type Assignment = typeof Assignment.infer;
 

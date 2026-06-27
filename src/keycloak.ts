@@ -109,6 +109,17 @@ export async function getGroupMembers(
 	return members;
 }
 
+export async function createGroup(
+	name: string,
+	parentId: string,
+): Promise<string> {
+	const { id } = await client.groups.createChildGroup(
+		{ id: parentId },
+		{ name },
+	);
+	return id;
+}
+
 export async function removeUserFromGroup(
 	userId: string,
 	groupId: string,

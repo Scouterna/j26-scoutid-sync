@@ -36,8 +36,34 @@ export function evaluateCondition(
 	internalContext: {
 		answers: Answer[];
 	},
+	mappings?: Map<string, Map<string, Record<string, string>>>,
 ) {
 	const functions = new Map<string, FunctionDefinition>();
+
+	functions.set("lookup", {
+		name: "lookup",
+		minArgs: 3,
+		maxArgs: 3,
+		call: (
+			filename: ExpressionData,
+			column: ExpressionData,
+			key: ExpressionData,
+		) => {
+			const file = filename.coerceString();
+			const col = column.coerceString();
+			const k = key.coerceString();
+			if (!file || !col || !k) return new Null();
+			const table = mappings?.get(file);
+			if (!table) return new Null();
+			const row = table.get(k);
+			if (!row) {
+				console.warn(`lookup: no mapping found for key "${k}" in "${file}"`);
+				return new Null();
+			}
+			const value = row[col];
+			return value ? new StringData(value) : new Null();
+		},
+	});
 
 	functions.set("getanswer", {
 		name: "getAnswer",

@@ -5,6 +5,7 @@ import type { NormalizedParticipant } from "./types.ts";
 export function evaluateGroups(
 	participants: NormalizedParticipant[],
 	assignments: Assignment[],
+	mappings?: Map<string, Map<string, Record<string, string>>>,
 ) {
 	const groups: Map<number, string[]> = new Map();
 
@@ -23,6 +24,7 @@ export function evaluateGroups(
 				assignment.if,
 				{ fee: participant.fee },
 				{ answers: participant.answers },
+				mappings,
 			);
 
 			const numberResult = result.number();
@@ -34,6 +36,19 @@ export function evaluateGroups(
 
 			if (ok) {
 				participantGroups.push(...assignment.groups);
+
+				for (const dynGroup of assignment.dynamicGroups ?? []) {
+					const nameResult = evaluateCondition(
+						dynGroup.nameExpression,
+						{ fee: participant.fee },
+						{ answers: participant.answers },
+						mappings,
+					);
+					const name = nameResult.coerceString();
+					if (name && name !== "false" && name !== "0") {
+						participantGroups.push(`${dynGroup.parent}/${name}`);
+					}
+				}
 			}
 		}
 	}

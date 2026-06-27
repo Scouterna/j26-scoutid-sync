@@ -2,7 +2,13 @@ import pLimit from "p-limit";
 import { loadConfig } from "./config.ts";
 import { env } from "./env.ts";
 import { evaluateGroups } from "./groups.ts";
-import { addUserToGroup, createUser, removeUserFromGroup } from "./keycloak.ts";
+import {
+	addUserToGroup,
+	createGroup,
+	createUser,
+	removeUserFromGroup,
+} from "./keycloak.ts";
+import { extractLookupFiles, loadMappings } from "./mapping.ts";
 import { getKeycloakState } from "./steps/getKeycloakState.ts";
 import { getScoutnetState } from "./steps/getScoutnetState.ts";
 
@@ -15,12 +21,53 @@ let start = performance.now();
 const keycloakState = await getKeycloakState();
 const scoutnetState = await getScoutnetState();
 
-const groupAssignments = await evaluateGroups(
+const lookupFiles = extractLookupFiles(config.assignments);
+const mappings = new Map<string, Map<string, Record<string, string>>>();
+for (const file of lookupFiles) {
+	mappings.set(file, await loadMappings(file));
+}
+
+const groupAssignments = evaluateGroups(
 	scoutnetState.participants,
 	config.assignments,
+	mappings,
 );
 
 console.log(`Data loading took ${(performance.now() - start).toFixed(2)}ms`);
+
+// Collect every dynamic sub-group path ("parent/child") referenced across all
+// assignments and create any that don't yet exist in Keycloak.
+const dynamicGroupPaths = new Set<string>();
+for (const assignment of groupAssignments) {
+	for (const groupName of assignment.groups) {
+		if (groupName.includes("/")) {
+			dynamicGroupPaths.add(groupName);
+		}
+	}
+}
+for (const groupPath of dynamicGroupPaths) {
+	if (!keycloakState.groupNameToId.has(groupPath)) {
+		const slashIdx = groupPath.indexOf("/");
+		const parentName = groupPath.slice(0, slashIdx);
+		const childName = groupPath.slice(slashIdx + 1);
+		const parentId = keycloakState.groupNameToId.get(parentName);
+		if (!parentId) {
+			throw new Error(`Parent group "${parentName}" not found in Keycloak`);
+		}
+		if (CACHE_MODE === "read") {
+			console.warn(
+				`SKIP: Group "${childName}" under "${parentName}" would be created if not in read cache mode.`,
+			);
+		} else {
+			const newGroupId = await createGroup(childName, parentId);
+			keycloakState.groupNameToId.set(groupPath, newGroupId);
+		}
+	}
+}
+
+const usersByUsername = new Map(
+	keycloakState.users.map((u) => [u.username, u]),
+);
 
 let createdUsers = 0;
 let addedToGroups = 0;
@@ -37,7 +84,7 @@ await Promise.all(
 	groupAssignments.map((assignment) =>
 		writeLimit(async () => {
 			const username = `scoutnet|${assignment.memberNumber}`;
-			const user = keycloakState.users.find((u) => u.username === username);
+			const user = usersByUsername.get(username);
 			let userId = user?.id;
 
 			if (!user) {

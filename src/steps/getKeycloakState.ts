@@ -31,22 +31,48 @@ export async function getKeycloakState() {
 	const cachedGetAllGroups = withCache(getAllGroups);
 	const cachedGetGroupMembers = withCache(getGroupMembers);
 
+	const limit = pLimit(10);
+
 	let start = performance.now();
-	const groups = await cachedGetAllGroups(KEYCLOAK_PARENT_GROUP_ID);
+	const topLevelGroups = await cachedGetAllGroups(KEYCLOAK_PARENT_GROUP_ID);
 	console.log(
-		`Fetched ${groups.length} Keycloak groups in ${(performance.now() - start).toFixed(2)}ms`,
+		`Fetched ${topLevelGroups.length} Keycloak groups in ${(performance.now() - start).toFixed(2)}ms`,
 	);
+
+	// Fetch sub-groups of every top-level group in parallel.
+	start = performance.now();
+	const subGroupsByParentId = new Map<
+		string,
+		Awaited<ReturnType<typeof getAllGroups>>
+	>();
+	await Promise.all(
+		topLevelGroups.map((group) =>
+			limit(async () => {
+				if (!group.id) {
+					throw new Error(`Group is missing id: ${JSON.stringify(group)}`);
+				}
+				const subGroups = await cachedGetAllGroups(group.id);
+				if (subGroups.length > 0) {
+					subGroupsByParentId.set(group.id, subGroups);
+				}
+			}),
+		),
+	);
+	const allSubGroups = Array.from(subGroupsByParentId.values()).flat();
+	console.log(
+		`Fetched ${allSubGroups.length} Keycloak sub-groups in ${(performance.now() - start).toFixed(2)}ms`,
+	);
+
+	const allGroups = [...topLevelGroups, ...allSubGroups];
 
 	/**
 	 * Map of user ID to array of group IDs they are a member of.
 	 */
 	const groupMemberships = new Map<string, string[]>();
 
-	const limit = pLimit(10);
-
 	start = performance.now();
 	await Promise.all(
-		groups.map((group) =>
+		allGroups.map((group) =>
 			limit(async () => {
 				if (!group.id) {
 					throw new Error(`Group is missing id: ${JSON.stringify(group)}`);
@@ -68,15 +94,30 @@ export async function getKeycloakState() {
 	);
 
 	console.log(
-		`Fetched Keycloak members of ${groups.length} groups in ${(performance.now() - start).toFixed(2)}ms`,
+		`Fetched Keycloak members of ${allGroups.length} groups in ${(performance.now() - start).toFixed(2)}ms`,
 	);
 
+	// Build groupNameToId: top-level groups by plain name, sub-groups by "parent/child".
 	const groupNameToId = new Map<string, string>();
-	for (const group of groups) {
+	for (const group of topLevelGroups) {
 		if (!group.id || !group.name) {
 			throw new Error(`Group is missing id or name: ${JSON.stringify(group)}`);
 		}
 		groupNameToId.set(group.name, group.id);
+	}
+	for (const [parentId, subGroups] of subGroupsByParentId) {
+		const parent = topLevelGroups.find((g) => g.id === parentId);
+		if (!parent?.name) {
+			throw new Error(`Parent group ${parentId} not found in top-level groups`);
+		}
+		for (const subGroup of subGroups) {
+			if (!subGroup.id || !subGroup.name) {
+				throw new Error(
+					`Sub-group is missing id or name: ${JSON.stringify(subGroup)}`,
+				);
+			}
+			groupNameToId.set(`${parent.name}/${subGroup.name}`, subGroup.id);
+		}
 	}
 
 	start = performance.now();

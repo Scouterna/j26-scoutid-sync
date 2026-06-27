@@ -1,6 +1,6 @@
 assignments:
+# Uses GitHub Actions expression syntax, see https://docs.github.com/en/actions/reference/workflows-and-actions/expressions
 - groups: [j26-staff]
-  # Uses GitHub Actions expression syntax, see https://docs.github.com/en/actions/reference/workflows-and-actions/expressions
   if: |
     contains(fromJSON('["Funktionär"]'), fee.name) &&
     getAnswer('Internt', 'Allokering', 'Funktion')
@@ -9,3 +9,25 @@ assignments:
   if: |
     contains(fromJSON('["Funktionär"]'), fee.name) &&
     getAnswer('Internt', 'Allokering', 'Planeringsfunktionär') == 'checked'
+
+# j26-groups: one sub-group per kår, named after the kår ID from the form.
+# dynamicGroups creates the sub-group in Keycloak the first time it's seen.
+- groups: [j26-groups]
+  dynamicGroups:
+    - parent: j26-groups
+      nameExpression: "getAnswer('Tab', 'Sektion', 'Kår-ID')"
+  if: "getAnswer('Tab', 'Sektion', 'Kår-ID')"
+
+# j26-villages: one sub-group per village, looked up from the kår CSV.
+- groups: [j26-villages]
+  dynamicGroups:
+    - parent: j26-villages
+      nameExpression: "lookup('kårer.csv', 'bynummer', getAnswer('Tab', 'Sektion', 'Kår-ID'))"
+  if: "lookup('kårer.csv', 'bynummer', getAnswer('Tab', 'Sektion', 'Kår-ID'))"
+
+# j26-districts: one sub-group per district, looked up from the kår CSV.
+- groups: [j26-districts]
+  dynamicGroups:
+    - parent: j26-districts
+      nameExpression: "lookup('kårer.csv', 'stadsdel', getAnswer('Tab', 'Sektion', 'Kår-ID'))"
+  if: "lookup('kårer.csv', 'stadsdel', getAnswer('Tab', 'Sektion', 'Kår-ID'))"
