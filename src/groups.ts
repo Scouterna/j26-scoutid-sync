@@ -1,5 +1,5 @@
 import type { Assignment } from "./config.ts";
-import { evaluateCondition } from "./expressions.ts";
+import { buildAnswerIndex, evaluateCondition } from "./expressions.ts";
 import type { NormalizedParticipant } from "./types.ts";
 
 export function evaluateGroups(
@@ -19,11 +19,13 @@ export function evaluateGroups(
 		const participantGroups = groups.get(participant.memberNumber) ?? [];
 		groups.set(participant.memberNumber, participantGroups);
 
+		const answerIndex = buildAnswerIndex(participant.answers);
+
 		for (const assignment of assignments) {
 			const result = evaluateCondition(
 				assignment.if,
 				{ fee: participant.fee },
-				{ answers: participant.answers },
+				{ answerIndex },
 				mappings,
 			);
 
@@ -41,7 +43,7 @@ export function evaluateGroups(
 					const nameResult = evaluateCondition(
 						dynGroup.nameExpression,
 						{ fee: participant.fee },
-						{ answers: participant.answers },
+						{ answerIndex },
 						mappings,
 					);
 					const name = nameResult.coerceString();

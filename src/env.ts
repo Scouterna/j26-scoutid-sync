@@ -12,4 +12,8 @@ export const env = arkenv({
 	SCOUTNET_FORM_ID: "number",
 	SCOUTNET_MEMBERS_API_KEY: "string",
 	SCOUTNET_QUESTIONS_API_KEY: "string",
+
+	"WRITE_CONCURRENCY?": "number",
+	"READ_CONCURRENCY?": "number",
+	"MAX_RETRIES?": "number",
 });

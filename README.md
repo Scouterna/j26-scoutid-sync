@@ -16,6 +16,18 @@ Copy the `.env.example` file to `.env` and fill in the required environment
 variables. Create a `config.yml` file based on the `config.example.yml` file and
 set it up as you wish.
 
+### Performance tuning
+
+For large syncs (~20,000 users), the defaults are conservative. After verifying your Keycloak handles the load, raise `WRITE_CONCURRENCY` to cut wall-clock time:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `WRITE_CONCURRENCY` | 5 | Max concurrent group/user writes. Raising to 20–50 significantly cuts runtime. |
+| `READ_CONCURRENCY` | 10 | Max concurrent group/member reads during state fetch. |
+| `MAX_RETRIES` | 5 | Retries per API call on transient errors (5xx, network failures, token expiry). |
+
+The tool automatically refreshes its Keycloak access token before expiry, so long-running syncs don't need manual intervention.
+
 Then, you can run the tool using Docker:
 ```bash
 docker run \

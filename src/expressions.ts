@@ -28,13 +28,24 @@ export function evaluateExpression(
 	return evaluator.evaluate();
 }
 
+export function buildAnswerIndex(answers: Answer[]): Map<string, Answer> {
+	const index = new Map<string, Answer>();
+	for (const answer of answers) {
+		index.set(
+			`${answer.tabName}\0${answer.sectionName}\0${answer.questionName}`,
+			answer,
+		);
+	}
+	return index;
+}
+
 export function evaluateCondition(
 	expression: string,
 	context: {
 		fee: Fee;
 	},
 	internalContext: {
-		answers: Answer[];
+		answerIndex: Map<string, Answer>;
 	},
 	mappings?: Map<string, Map<string, Record<string, string>>>,
 ) {
@@ -74,12 +85,8 @@ export function evaluateCondition(
 			sectionName: ExpressionData,
 			questionName: ExpressionData,
 		) => {
-			const answer = internalContext.answers.find(
-				(a) =>
-					a.tabName === tabName.coerceString() &&
-					a.sectionName === sectionName.coerceString() &&
-					a.questionName === questionName.coerceString(),
-			);
+			const key = `${tabName.coerceString()}\0${sectionName.coerceString()}\0${questionName.coerceString()}`;
+			const answer = internalContext.answerIndex.get(key);
 
 			if (answer) {
 				if (Array.isArray(answer.value)) {

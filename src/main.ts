@@ -12,7 +12,7 @@ import { extractLookupFiles, loadMappings } from "./mapping.ts";
 import { getKeycloakState } from "./steps/getKeycloakState.ts";
 import { getScoutnetState } from "./steps/getScoutnetState.ts";
 
-const { CACHE_MODE } = env;
+const { CACHE_MODE, WRITE_CONCURRENCY } = env;
 
 const config = await loadConfig("config.yml");
 
@@ -35,6 +35,10 @@ const groupAssignments = evaluateGroups(
 
 console.log(`Data loading took ${(performance.now() - start).toFixed(2)}ms`);
 
+const failures: Array<{ id: string; error: unknown }> = [];
+
+const writeLimit = pLimit(WRITE_CONCURRENCY ?? 5);
+
 // Collect every dynamic sub-group path ("parent/child") referenced across all
 // assignments and create any that don't yet exist in Keycloak.
 const dynamicGroupPaths = new Set<string>();
@@ -45,25 +49,39 @@ for (const assignment of groupAssignments) {
 		}
 	}
 }
-for (const groupPath of dynamicGroupPaths) {
-	if (!keycloakState.groupNameToId.has(groupPath)) {
-		const slashIdx = groupPath.indexOf("/");
-		const parentName = groupPath.slice(0, slashIdx);
-		const childName = groupPath.slice(slashIdx + 1);
-		const parentId = keycloakState.groupNameToId.get(parentName);
-		if (!parentId) {
-			throw new Error(`Parent group "${parentName}" not found in Keycloak`);
-		}
-		if (CACHE_MODE === "read") {
-			console.warn(
-				`SKIP: Group "${childName}" under "${parentName}" would be created if not in read cache mode.`,
-			);
-		} else {
-			const newGroupId = await createGroup(childName, parentId);
-			keycloakState.groupNameToId.set(groupPath, newGroupId);
-		}
-	}
-}
+await Promise.all(
+	Array.from(dynamicGroupPaths).map((groupPath) =>
+		writeLimit(async () => {
+			if (keycloakState.groupNameToId.has(groupPath)) return;
+
+			const slashIdx = groupPath.indexOf("/");
+			const parentName = groupPath.slice(0, slashIdx);
+			const childName = groupPath.slice(slashIdx + 1);
+			const parentId = keycloakState.groupNameToId.get(parentName);
+			if (!parentId) {
+				failures.push({
+					id: `group:${groupPath}`,
+					error: new Error(
+						`Parent group "${parentName}" not found in Keycloak`,
+					),
+				});
+				return;
+			}
+			if (CACHE_MODE === "read") {
+				console.warn(
+					`SKIP: Group "${childName}" under "${parentName}" would be created if not in read cache mode.`,
+				);
+			} else {
+				try {
+					const newGroupId = await createGroup(childName, parentId);
+					keycloakState.groupNameToId.set(groupPath, newGroupId);
+				} catch (err) {
+					failures.push({ id: `group:${groupPath}`, error: err });
+				}
+			}
+		}),
+	),
+);
 
 const usersByUsername = new Map(
 	keycloakState.users.map((u) => [u.username, u]),
@@ -73,8 +91,6 @@ let createdUsers = 0;
 let addedToGroups = 0;
 let removedFromGroups = 0;
 
-const writeLimit = pLimit(5);
-
 const total = groupAssignments.length;
 let processed = 0;
 console.log(`Syncing ${total} participants...`);
@@ -83,70 +99,78 @@ start = performance.now();
 await Promise.all(
 	groupAssignments.map((assignment) =>
 		writeLimit(async () => {
-			const username = `scoutnet|${assignment.memberNumber}`;
-			const user = usersByUsername.get(username);
-			let userId = user?.id;
+			try {
+				const username = `scoutnet|${assignment.memberNumber}`;
+				const user = usersByUsername.get(username);
+				let userId = user?.id;
 
-			if (!user) {
-				createdUsers++;
-				if (CACHE_MODE === "read") {
-					console.warn(
-						`SKIP: User ${username} would be created in Keycloak if not in read cache mode.`,
+				if (!user) {
+					createdUsers++;
+					if (CACHE_MODE === "read") {
+						console.warn(
+							`SKIP: User ${username} would be created in Keycloak if not in read cache mode.`,
+						);
+						processed++;
+						return;
+					}
+					userId = await createUser(username);
+				}
+
+				if (!userId) {
+					// Just here for type safety
+					throw new Error(
+						`User ID for ${username} is undefined after creation`,
 					);
-					processed++;
-					return;
 				}
-				userId = await createUser(username);
-			}
 
-			if (!userId) {
-				// Just here for type safety
-				throw new Error(`User ID for ${username} is undefined after creation`);
-			}
+				const currentGroupIds =
+					keycloakState.groupMemberships.get(userId) ?? [];
 
-			const currentGroupIds = keycloakState.groupMemberships.get(userId) ?? [];
+				const targetGroupIds = assignment.groups.map((groupName) => {
+					const groupId = keycloakState.groupNameToId.get(groupName);
+					if (!groupId) {
+						throw new Error(`Group "${groupName}" not found in Keycloak`);
+					}
+					return groupId;
+				});
 
-			const targetGroupIds = assignment.groups.map((groupName) => {
-				const groupId = keycloakState.groupNameToId.get(groupName);
-				if (!groupId) {
-					throw new Error(`Group "${groupName}" not found in Keycloak`);
+				const groupsToLeave = currentGroupIds.filter(
+					(groupId) => !targetGroupIds.includes(groupId),
+				);
+				const groupsToJoin = targetGroupIds.filter(
+					(groupId) => !currentGroupIds.includes(groupId),
+				);
+
+				removedFromGroups += groupsToLeave.length;
+				addedToGroups += groupsToJoin.length;
+
+				for (const groupId of groupsToLeave) {
+					if (CACHE_MODE === "read") {
+						console.warn(
+							`SKIP: User ${username} would be removed from group ID ${groupId} if not in read cache mode.`,
+						);
+						continue;
+					}
+					await removeUserFromGroup(userId, groupId);
 				}
-				return groupId;
-			});
 
-			const groupsToLeave = currentGroupIds.filter(
-				(groupId) => !targetGroupIds.includes(groupId),
-			);
-			const groupsToJoin = targetGroupIds.filter(
-				(groupId) => !currentGroupIds.includes(groupId),
-			);
-
-			removedFromGroups += groupsToLeave.length;
-			addedToGroups += groupsToJoin.length;
-
-			for (const groupId of groupsToLeave) {
-				if (CACHE_MODE === "read") {
-					console.warn(
-						`SKIP: User ${username} would be removed from group ID ${groupId} if not in read cache mode.`,
-					);
-					continue;
+				for (const groupId of groupsToJoin) {
+					if (CACHE_MODE === "read") {
+						console.warn(
+							`SKIP: User ${username} would be added to group ID ${groupId} if not in read cache mode.`,
+						);
+						continue;
+					}
+					await addUserToGroup(userId, groupId);
 				}
-				await removeUserFromGroup(userId, groupId);
-			}
 
-			for (const groupId of groupsToJoin) {
-				if (CACHE_MODE === "read") {
-					console.warn(
-						`SKIP: User ${username} would be added to group ID ${groupId} if not in read cache mode.`,
-					);
-					continue;
+				processed++;
+				if (processed % 100 === 0) {
+					console.log(`Synced ${processed}/${total} participants...`);
 				}
-				await addUserToGroup(userId, groupId);
-			}
-
-			processed++;
-			if (processed % 100 === 0) {
-				console.log(`Synced ${processed}/${total} participants...`);
+			} catch (err) {
+				failures.push({ id: `user:${assignment.memberNumber}`, error: err });
+				processed++;
 			}
 		}),
 	),
@@ -165,21 +189,28 @@ const usersWithoutAssignments = usersWithGroups.filter(
 await Promise.all(
 	usersWithoutAssignments.map((user) =>
 		writeLimit(async () => {
-			const userId = user.id;
-			if (!userId) {
-				throw new Error(`User ID for ${user.username} is undefined`);
-			}
-
-			const groupIds = keycloakState.groupMemberships.get(userId) ?? [];
-
-			for (const groupId of groupIds) {
-				if (CACHE_MODE === "read") {
-					console.warn(
-						`SKIP: User ${user.username} would be removed from group ID ${groupId} if not in read cache mode.`,
-					);
-					continue;
+			try {
+				const userId = user.id;
+				if (!userId) {
+					throw new Error(`User ID for ${user.username} is undefined`);
 				}
-				await removeUserFromGroup(userId, groupId);
+
+				const groupIds = keycloakState.groupMemberships.get(userId) ?? [];
+
+				for (const groupId of groupIds) {
+					if (CACHE_MODE === "read") {
+						console.warn(
+							`SKIP: User ${user.username} would be removed from group ID ${groupId} if not in read cache mode.`,
+						);
+						continue;
+					}
+					await removeUserFromGroup(userId, groupId);
+				}
+			} catch (err) {
+				failures.push({
+					id: `cleanup:${user.username ?? user.id}`,
+					error: err,
+				});
 			}
 		}),
 	),
@@ -195,3 +226,15 @@ console.log(`Removed from groups: ${removedFromGroups}`);
 console.log(
 	`Removed from groups due to no assignment: ${usersWithoutAssignments.length}`,
 );
+
+if (failures.length > 0) {
+	console.error(`\nFailed to sync ${failures.length} item(s):`);
+	for (const { id, error } of failures.slice(0, 10)) {
+		const message = error instanceof Error ? error.message : String(error);
+		console.error(`  ${id}: ${message}`);
+	}
+	if (failures.length > 10) {
+		console.error(`  ... and ${failures.length - 10} more`);
+	}
+	process.exitCode = 1;
+}

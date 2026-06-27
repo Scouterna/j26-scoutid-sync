@@ -15,6 +15,7 @@ const {
 	KEYCLOAK_CLIENT_ID,
 	KEYCLOAK_CLIENT_SECRET,
 	KEYCLOAK_PARENT_GROUP_ID,
+	READ_CONCURRENCY,
 } = env;
 
 export async function getKeycloakState() {
@@ -31,7 +32,7 @@ export async function getKeycloakState() {
 	const cachedGetAllGroups = withCache(getAllGroups);
 	const cachedGetGroupMembers = withCache(getGroupMembers);
 
-	const limit = pLimit(10);
+	const limit = pLimit(READ_CONCURRENCY ?? 10);
 
 	let start = performance.now();
 	const topLevelGroups = await cachedGetAllGroups(KEYCLOAK_PARENT_GROUP_ID);
