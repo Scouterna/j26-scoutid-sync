@@ -1,7 +1,7 @@
 import pLimit from "p-limit";
 import { loadConfig } from "./config.ts";
 import { env } from "./env.ts";
-import { evaluateGroups } from "./groups.ts";
+import { evaluateGroups, getManagedGroupIds } from "./groups.ts";
 import {
 	addUserToGroup,
 	createGroup,
@@ -31,6 +31,14 @@ const groupAssignments = evaluateGroups(
 	scoutnetState.participants,
 	config.assignments,
 	mappings,
+);
+
+// Only groups referenced by this config may be added/removed. This keeps
+// runs with different configs from clobbering each other's group
+// memberships when they share the same Keycloak realm.
+const managedGroupIds = getManagedGroupIds(
+	config.assignments,
+	keycloakState.groupNameToId,
 );
 
 console.log(`Data loading took ${(performance.now() - start).toFixed(2)}ms`);
@@ -135,7 +143,8 @@ await Promise.all(
 				});
 
 				const groupsToLeave = currentGroupIds.filter(
-					(groupId) => !targetGroupIds.includes(groupId),
+					(groupId) =>
+						managedGroupIds.has(groupId) && !targetGroupIds.includes(groupId),
 				);
 				const groupsToJoin = targetGroupIds.filter(
 					(groupId) => !currentGroupIds.includes(groupId),
@@ -176,13 +185,15 @@ await Promise.all(
 	),
 );
 
-const usersWithGroups = keycloakState.users.filter((user) =>
-	keycloakState.groupMemberships.has(user.id ?? ""),
+const usersWithManagedGroups = keycloakState.users.filter((user) =>
+	(keycloakState.groupMemberships.get(user.id ?? "") ?? []).some((groupId) =>
+		managedGroupIds.has(groupId),
+	),
 );
 const assignmentUsernames = new Set(
 	groupAssignments.map((a) => `scoutnet|${a.memberNumber}`),
 );
-const usersWithoutAssignments = usersWithGroups.filter(
+const usersWithoutAssignments = usersWithManagedGroups.filter(
 	(u) => !assignmentUsernames.has(u.username ?? ""),
 );
 
@@ -195,7 +206,11 @@ await Promise.all(
 					throw new Error(`User ID for ${user.username} is undefined`);
 				}
 
-				const groupIds = keycloakState.groupMemberships.get(userId) ?? [];
+				// Only remove memberships in groups this config manages; groups
+				// owned by other configs are left untouched.
+				const groupIds = (
+					keycloakState.groupMemberships.get(userId) ?? []
+				).filter((groupId) => managedGroupIds.has(groupId));
 
 				for (const groupId of groupIds) {
 					if (CACHE_MODE === "read") {
